@@ -2,7 +2,7 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
-from hees_sola.audio import detect_platform
+from hees_sola.audio import detect_platform, publish_progress
 
 
 class VocalExtraction(Document):
@@ -14,6 +14,10 @@ class VocalExtraction(Document):
 		self.access_key = frappe.generate_hash(length=24)
 
 	def after_insert(self):
+		if self.flags.client_download:
+			# The user's device fetches the audio and uploads it; see api.upload_audio.
+			self.db_set({"status": "Queued", "error_log": None})
+			return
 		self.queue_download()
 
 	def queue_download(self):
@@ -26,6 +30,7 @@ class VocalExtraction(Document):
 				"completed_at": None,
 			}
 		)
+		publish_progress(self.name, status="Queued")
 		frappe.enqueue(
 			"hees_sola.audio.process_download",
 			queue="long",
@@ -51,11 +56,12 @@ class VocalExtraction(Document):
 			frappe.throw(_("Removing the music is already running."))
 
 		self.db_set({"status": "Separating", "error_log": None, "completed_at": None})
+		publish_progress(self.name, status="Separating")
 		frappe.enqueue(
 			"hees_sola.audio.process_separation",
 			queue="long",
 			enqueue_after_commit=True,
-			timeout=3600,
+			timeout=7200,
 			docname=self.name,
 		)
 		return self.status
